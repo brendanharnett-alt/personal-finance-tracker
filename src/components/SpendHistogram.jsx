@@ -1,5 +1,5 @@
 import { useMemo, useEffect } from 'react'
-import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 
 export default function SpendHistogram({ transactions, chartMode = 'expense', onModeChange, onBarClick, selectedTypeName = null }) {
   const mode = chartMode ?? 'expense'
@@ -121,7 +121,7 @@ export default function SpendHistogram({ transactions, chartMode = 'expense', on
           <div style={{ width: '100%', height: 320, overflowY: 'auto' }}>
             <div style={{ width: '100%', minHeight: 320, height: 320 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart layout="vertical" data={totalsData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                <BarChart layout="vertical" data={totalsData} margin={{ top: 8, right: 60, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
                   <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={120} />
@@ -130,6 +130,7 @@ export default function SpendHistogram({ transactions, chartMode = 'expense', on
                     labelFormatter={(label) => label}
                   />
                   <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    <LabelList dataKey="value" position="right" formatter={(v) => `$${Number(v).toFixed(2)}`} />
                     {totalsData.map((entry, idx) => (
                       <Cell
                         key={`all-${idx}-${entry.name}`}
@@ -165,7 +166,7 @@ export default function SpendHistogram({ transactions, chartMode = 'expense', on
         <div style={{ width: '100%', height: 320, overflowY: 'auto' }}>
           <div style={{ width: '100%', minHeight: 320, height: Math.max(320, data.length * 40) }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart layout="vertical" data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+              <BarChart layout="vertical" data={data} margin={{ top: 8, right: 60, left: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
                 <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={120} />
@@ -182,6 +183,7 @@ export default function SpendHistogram({ transactions, chartMode = 'expense', on
                     onClick={handleBarClick}
                     style={{ cursor: onBarClick ? 'pointer' : undefined }}
                   >
+                    <LabelList dataKey="income" position="right" formatter={(v) => `$${Number(v).toFixed(2)}`} />
                     {data.map((entry, idx) => (
                       <Cell
                         key={`income-${idx}-${entry.name}`}
@@ -202,6 +204,7 @@ export default function SpendHistogram({ transactions, chartMode = 'expense', on
                     onClick={handleBarClick}
                     style={{ cursor: onBarClick ? 'pointer' : undefined }}
                   >
+                    <LabelList dataKey="expense" position="right" formatter={(v) => `$${Number(v).toFixed(2)}`} />
                     {data.map((entry, idx) => (
                       <Cell
                         key={`expense-${idx}-${entry.name}`}

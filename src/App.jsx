@@ -123,6 +123,17 @@ function App() {
     }
   }, [])
 
+  const handleRenameTab = useCallback((tabId, newLabel) => {
+    const trimmed = newLabel != null ? String(newLabel).trim() : ''
+    if (!tabId || trimmed === '') return
+    const { rules, tabs: currentTabs, tabOrder } = loadFinanceData()
+    const tab = currentTabs[tabId]
+    if (!tab) return
+    const nextTabs = { ...currentTabs, [tabId]: { ...tab, label: trimmed } }
+    saveFinanceData({ rules, tabs: nextTabs, tabOrder })
+    setFinanceData((prev) => ({ ...prev, tabs: nextTabs }))
+  }, [])
+
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 p-6 font-sans">
       <header className="mb-6">
@@ -139,6 +150,7 @@ function App() {
             selectedTabId={selectedTabId}
             onSelectTab={setSelectedTabId}
             onDeleteTab={handleDeleteTab}
+            onRenameTab={handleRenameTab}
           />
           {selectedTabId && (
             <>
