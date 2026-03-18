@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { loadFinanceData, saveFinanceData } from './utils/storage'
+import { loadFinanceData, saveFinanceData, getSelectedTabId, setSelectedTabIdStorage } from './utils/storage'
 import UploadCSV from './components/UploadCSV'
 import MonthTabs from './components/MonthTabs'
 import TransactionGrid from './components/TransactionGrid'
 import SpendHistogram from './components/SpendHistogram'
 
-const defaultChartVisibility = () => ({ showIncome: false, showExpense: true })
+const defaultChartMode = () => 'expense'
 
 function App() {
   const [financeData, setFinanceData] = useState({ rules: {}, tabs: {}, tabOrder: [] })
   const [selectedTabId, setSelectedTabId] = useState(null)
-  const [chartVisibilityByTabId, setChartVisibilityByTabId] = useState({})
+  const [chartModeByTabId, setChartModeByTabId] = useState({})
   const [chartDrillDownByTabId, setChartDrillDownByTabId] = useState({})
 
   const refresh = useCallback((selectTabId = null) => {
@@ -22,7 +22,16 @@ function App() {
     fetch('http://127.0.0.1:7242/ingest/59f16d9b-ce18-4b81-8b3f-6df2f0194bfe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9b3957'},body:JSON.stringify({sessionId:'9b3957',location:'App.jsx:refresh',message:'Refresh called, data loaded',data:{tabOrderLength:data.tabOrder?.length,firstTabId,transactionsLength:tx.length,categoriesSample:tx.slice(0,5).map(t=>t.category)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
     // #endregion
     setFinanceData(data)
-    if (selectTabId != null) setSelectedTabId(selectTabId)
+    if (selectTabId != null) {
+      setSelectedTabId(selectTabId)
+    } else if (data.tabOrder?.length) {
+      const stored = getSelectedTabId()
+      if (stored && data.tabOrder.includes(stored)) {
+        setSelectedTabId(stored)
+      } else {
+        setSelectedTabId(data.tabOrder[0])
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -35,20 +44,43 @@ function App() {
   const getTypeLabel = useCallback((t) =>
     (t.type != null && String(t.type).trim() !== '') ? String(t.type).trim() : 'Uncategorized', [])
 
-  const selectedChartType = selectedTabId ? (chartDrillDownByTabId[selectedTabId] ?? null) : null
-  const filteredTransactions = useMemo(() => {
-    if (selectedChartType == null || selectedChartType === 'Total') return transactions
-    return transactions.filter((t) => getTypeLabel(t) === selectedChartType)
-  }, [transactions, selectedChartType, getTypeLabel])
+  const chartMode = useMemo(() => {
+    if (!selectedTabId) return defaultChartMode()
+    return chartModeByTabId[selectedTabId] ?? defaultChartMode()
+  }, [selectedTabId, chartModeByTabId])
 
-  const handleBarClick = useCallback((tabId, typeName) => {
-    setChartDrillDownByTabId((prev) => ({ ...prev, [tabId]: typeName }))
-  }, [])
+  const selectedChartType = selectedTabId ? (chartMode === 'all' ? null : (chartDrillDownByTabId[selectedTabId] ?? null)) : null
+
+  const filteredTransactions = useMemo(() => {
+    const signFiltered = transactions.filter((t) => {
+      const amt = t?.amount == null ? NaN : Number(t.amount)
+      if (chartMode === 'income') return Number.isFinite(amt) && amt > 0
+      if (chartMode === 'expense') return Number.isFinite(amt) && amt < 0
+      return true // all
+    })
+
+    if (chartMode === 'all') return signFiltered
+    if (selectedChartType == null || selectedChartType === 'Total') return signFiltered
+    return signFiltered.filter((t) => getTypeLabel(t) === selectedChartType)
+  }, [transactions, selectedChartType, getTypeLabel, chartMode])
+
+  const handleBarClick = useCallback(
+    (tabId, typeName) => {
+      const mode = tabId ? (chartModeByTabId[tabId] ?? defaultChartMode()) : defaultChartMode()
+      if (mode === 'all') return
+      setChartDrillDownByTabId((prev) => ({ ...prev, [tabId]: typeName }))
+    },
+    [chartModeByTabId]
+  )
 
   useEffect(() => {
     if (tabOrder.length === 0) return
     if (!selectedTabId || !tabOrder.includes(selectedTabId)) setSelectedTabId(tabOrder[0])
   }, [tabOrder, selectedTabId])
+
+  useEffect(() => {
+    if (selectedTabId) setSelectedTabIdStorage(selectedTabId)
+  }, [selectedTabId])
 
   const handleDeleteTab = useCallback(
     (tabId) => {
@@ -58,7 +90,7 @@ function App() {
       delete nextTabs[tabId]
       saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
       setFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
-      setChartVisibilityByTabId((prev) => {
+      setChartModeByTabId((prev) => {
         const next = { ...prev }
         delete next[tabId]
         return next
@@ -83,17 +115,12 @@ function App() {
     }))
   }, [])
 
-  const chartVisibilityRaw = selectedTabId
-    ? (chartVisibilityByTabId[selectedTabId] ?? defaultChartVisibility())
-    : defaultChartVisibility()
-  const chartVisibility = useMemo(() => {
-    const { showIncome, showExpense } = chartVisibilityRaw
-    if (showIncome) return { showIncome: true, showExpense: false }
-    return { showIncome: false, showExpense: true }
-  }, [chartVisibilityRaw])
-
-  const handleChartTogglesChange = useCallback((tabId, next) => {
-    setChartVisibilityByTabId((prev) => ({ ...prev, [tabId]: next }))
+  const handleChartModeChange = useCallback((tabId, nextMode) => {
+    setChartModeByTabId((prev) => ({ ...prev, [tabId]: nextMode }))
+    if (nextMode === 'all') {
+      // Disable drilldown in chart totals mode.
+      setChartDrillDownByTabId((prev) => ({ ...prev, [tabId]: null }))
+    }
   }, [])
 
   return (
@@ -118,9 +145,8 @@ function App() {
               <SpendHistogram
                 key={`chart-${selectedTabId}`}
                 transactions={transactions}
-                showIncome={chartVisibility.showIncome}
-                showExpense={chartVisibility.showExpense}
-                onTogglesChange={(next) => handleChartTogglesChange(selectedTabId, next)}
+                chartMode={chartMode}
+                onModeChange={(nextMode) => handleChartModeChange(selectedTabId, nextMode)}
                 onBarClick={(typeName) => handleBarClick(selectedTabId, typeName)}
                 selectedTypeName={selectedChartType}
               />

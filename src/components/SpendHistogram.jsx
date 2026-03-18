@@ -1,7 +1,11 @@
 import { useMemo, useEffect } from 'react'
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
-export default function SpendHistogram({ transactions, showIncome = false, showExpense = true, onTogglesChange, onBarClick, selectedTypeName = null }) {
+export default function SpendHistogram({ transactions, chartMode = 'expense', onModeChange, onBarClick, selectedTypeName = null }) {
+  const mode = chartMode ?? 'expense'
+  const showIncome = mode === 'income'
+  const showExpense = mode === 'expense'
+
   const rawData = useMemo(() => {
     const byType = {}
     for (const t of transactions) {
@@ -37,51 +41,35 @@ export default function SpendHistogram({ transactions, showIncome = false, showE
     return totalRow ? [totalRow, ...others] : others
   }, [rawData, showIncome, showExpense, activeKey])
 
+  const totalsData = useMemo(() => {
+    let totalIncome = 0
+    let totalExpense = 0
+    for (const t of transactions) {
+      const amt = Number(t?.amount)
+      if (!Number.isFinite(amt)) continue
+      if (amt > 0) totalIncome += amt
+      if (amt < 0) totalExpense += Math.abs(amt)
+    }
+    return [
+      { name: 'Income', value: Math.round(totalIncome * 100) / 100 },
+      { name: 'Expense', value: Math.round(totalExpense * 100) / 100 },
+    ]
+  }, [transactions])
+
   // #region agent log
   useEffect(() => {
     fetch('http://127.0.0.1:7242/ingest/59f16d9b-ce18-4b81-8b3f-6df2f0194bfe',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9b3957'},body:JSON.stringify({sessionId:'9b3957',location:'SpendHistogram.jsx:effect',message:'Chart received transactions',data:{transactionsLength:transactions.length,dataLength:data.length,dataCategories:data.map(d=>d.name)},timestamp:Date.now(),hypothesisId:'H3-H4'})}).catch(()=>{});
-  }, [transactions, data]);
+  }, [transactions, data, mode]);
   // #endregion
 
-  const handleModeChange = (income) => {
-    if (onTogglesChange) onTogglesChange({ showIncome: income, showExpense: !income })
+  const handleModeChange = (nextMode) => {
+    if (onModeChange) onModeChange(nextMode)
   }
 
-  const hasSelection = showIncome || showExpense
-  const emptyMessage = !hasSelection
-    ? 'Select Income or Expense to view the chart.'
-    : showIncome
-      ? 'No income in this period.'
-      : 'No expenses in this period.'
-
-  const chartTitle = showIncome ? 'Income by type' : 'Expense by type'
-
-  if (data.length === 0 || !hasSelection) {
-    return (
-      <div className="p-4 bg-white border border-neutral-200 rounded-lg shadow-sm">
-        <h2 className="text-lg font-medium mb-2">{chartTitle}</h2>
-<div className="flex rounded-lg border border-neutral-300 p-1 mb-4 w-fit">
-        <button
-          type="button"
-          onClick={() => handleModeChange(true)}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${showIncome ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
-        >
-          Income
-        </button>
-        <button
-          type="button"
-          onClick={() => handleModeChange(false)}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${showExpense ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
-        >
-          Expense
-        </button>
-      </div>
-      <p className="text-neutral-500 text-sm">{emptyMessage}</p>
-      </div>
-    )
-  }
+  const chartTitle = mode === 'all' ? 'Totals' : showIncome ? 'Income by type' : 'Expense by type'
 
   const handleBarClick = (e) => {
+    if (mode === 'all') return
     if (!onBarClick) return
     const typeName = e?.payload?.name
     if (typeName == null) return
@@ -92,77 +80,139 @@ export default function SpendHistogram({ transactions, showIncome = false, showE
     }
   }
 
+  const SegmentedControl = (
+    <div className="flex rounded-lg border border-neutral-300 p-1 mb-4 w-fit">
+      <button
+        type="button"
+        onClick={() => handleModeChange('all')}
+        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          mode === 'all' ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+        }`}
+      >
+        All
+      </button>
+      <button
+        type="button"
+        onClick={() => handleModeChange('income')}
+        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          showIncome ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+        }`}
+      >
+        Income
+      </button>
+      <button
+        type="button"
+        onClick={() => handleModeChange('expense')}
+        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+          showExpense ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'
+        }`}
+      >
+        Expense
+      </button>
+    </div>
+  )
+
+  if (mode === 'all') {
+    return (
+      <div className="p-4 bg-white border border-neutral-200 rounded-lg shadow-sm">
+        <h2 className="text-lg font-medium mb-2">{chartTitle}</h2>
+        {SegmentedControl}
+        <div className="overflow-x-auto">
+          <div style={{ width: '100%', height: 320, overflowY: 'auto' }}>
+            <div style={{ width: '100%', minHeight: 320, height: 320 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart layout="vertical" data={totalsData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+                  <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={120} />
+                  <Tooltip
+                    formatter={(value, name) => [`$${Number(value).toFixed(2)}`, name ?? '']}
+                    labelFormatter={(label) => label}
+                  />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {totalsData.map((entry, idx) => (
+                      <Cell
+                        key={`all-${idx}-${entry.name}`}
+                        fill={entry.name === 'Income' ? '#22c55e' : '#64748b'}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (data.length === 0) {
+    const emptyMessage = showIncome ? 'No income in this period.' : 'No expenses in this period.'
+    return (
+      <div className="p-4 bg-white border border-neutral-200 rounded-lg shadow-sm">
+        <h2 className="text-lg font-medium mb-2">{chartTitle}</h2>
+        {SegmentedControl}
+        <p className="text-neutral-500 text-sm">{emptyMessage}</p>
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 bg-white border border-neutral-200 rounded-lg shadow-sm">
       <h2 className="text-lg font-medium mb-2">{chartTitle}</h2>
-      <div className="flex rounded-lg border border-neutral-300 p-1 mb-4 w-fit">
-        <button
-          type="button"
-          onClick={() => handleModeChange(true)}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${showIncome ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
-        >
-          Income
-        </button>
-        <button
-          type="button"
-          onClick={() => handleModeChange(false)}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${showExpense ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
-        >
-          Expense
-        </button>
-      </div>
+      {SegmentedControl}
       <div className="overflow-x-auto">
         <div style={{ width: '100%', height: 320, overflowY: 'auto' }}>
           <div style={{ width: '100%', minHeight: 320, height: Math.max(320, data.length * 40) }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart layout="vertical" data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-              <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={120} />
-              <Tooltip
-                formatter={(value, name) => [`$${Number(value).toFixed(2)}`, name ?? '']}
-                labelFormatter={(label) => label}
-              />
-              {showIncome && (
-                <Bar
-                  dataKey="income"
-                  fill="#22c55e"
-                  radius={[0, 4, 4, 0]}
-                  name="Income"
-                  onClick={handleBarClick}
-                  style={{ cursor: onBarClick ? 'pointer' : undefined }}
-                >
-                  {data.map((entry, idx) => (
-                    <Cell
-                      key={`income-${idx}-${entry.name}`}
-                      fill={entry.name === 'Total' ? '#0f172a' : '#22c55e'}
-                      fillOpacity={
-                        selectedTypeName == null || selectedTypeName === 'Total' || entry.name === selectedTypeName ? 1 : 0.4
-                      }
-                    />
-                  ))}
-                </Bar>
-              )}
-              {showExpense && (
-                <Bar
-                  dataKey="expense"
-                  fill="#64748b"
-                  radius={[0, 4, 4, 0]}
-                  name="Expense"
-                  onClick={handleBarClick}
-                  style={{ cursor: onBarClick ? 'pointer' : undefined }}
-                >
-                  {data.map((entry, idx) => (
-                    <Cell
-                      key={`expense-${idx}-${entry.name}`}
-                      fill={entry.name === 'Total' ? '#0f172a' : '#64748b'}
-                      fillOpacity={
-                        selectedTypeName == null || selectedTypeName === 'Total' || entry.name === selectedTypeName ? 1 : 0.4
-                      }
-                    />
-                  ))}
-                </Bar>
-              )}
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
+                <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={120} />
+                <Tooltip
+                  formatter={(value, name) => [`$${Number(value).toFixed(2)}`, name ?? '']}
+                  labelFormatter={(label) => label}
+                />
+                {showIncome && (
+                  <Bar
+                    dataKey="income"
+                    fill="#22c55e"
+                    radius={[0, 4, 4, 0]}
+                    name="Income"
+                    onClick={handleBarClick}
+                    style={{ cursor: onBarClick ? 'pointer' : undefined }}
+                  >
+                    {data.map((entry, idx) => (
+                      <Cell
+                        key={`income-${idx}-${entry.name}`}
+                        fill={entry.name === 'Total' ? '#0f172a' : '#22c55e'}
+                        fillOpacity={
+                          selectedTypeName == null || selectedTypeName === 'Total' || entry.name === selectedTypeName ? 1 : 0.4
+                        }
+                      />
+                    ))}
+                  </Bar>
+                )}
+                {showExpense && (
+                  <Bar
+                    dataKey="expense"
+                    fill="#64748b"
+                    radius={[0, 4, 4, 0]}
+                    name="Expense"
+                    onClick={handleBarClick}
+                    style={{ cursor: onBarClick ? 'pointer' : undefined }}
+                  >
+                    {data.map((entry, idx) => (
+                      <Cell
+                        key={`expense-${idx}-${entry.name}`}
+                        fill={entry.name === 'Total' ? '#0f172a' : '#64748b'}
+                        fillOpacity={
+                          selectedTypeName == null || selectedTypeName === 'Total' || entry.name === selectedTypeName ? 1 : 0.4
+                        }
+                      />
+                    ))}
+                  </Bar>
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>

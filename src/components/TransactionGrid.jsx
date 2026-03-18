@@ -26,6 +26,14 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   const [aiTypeFillProgressDone, setAiTypeFillProgressDone] = useState(0)
   const [aiTypeFillProgressTotal, setAiTypeFillProgressTotal] = useState(0)
 
+  const AMOUNT_EPSILON = 1e-6
+  const normalizeAmountForCompare = useCallback((v) => {
+    if (v == null || v === '') return null
+    const n = Number(v)
+    if (!Number.isFinite(n)) return null
+    return n
+  }, [])
+
   useEffect(() => {
     if (!selectedTabId) return
     const k = Math.min(3, otherTabIds.length)
@@ -155,11 +163,19 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
       if (!tab || !Array.isArray(tab.transactions)) return
       const list = tab.transactions
 
+      const desiredAmount =
+        field === 'amount' ? normalizeAmountForCompare(event.oldValue) : normalizeAmountForCompare(event.data.amount)
+
       const idx = list.findIndex(
         (t) =>
           t.date === event.data.date &&
           t.description === event.data.description &&
-          (field === 'amount' ? t.amount === event.oldValue : t.amount === event.data.amount)
+          (() => {
+            if (desiredAmount == null) return true // Fall back to date+description match.
+            const tAmt = normalizeAmountForCompare(t.amount)
+            if (tAmt == null) return false
+            return Math.abs(tAmt - desiredAmount) <= AMOUNT_EPSILON
+          })()
       )
       if (idx === -1) return
 
@@ -201,7 +217,13 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   )
 
   const getRowId = useCallback(
-    (params) => `${params.rowIndex}-${params.data.date}-${params.data.description}`,
+    (params) => {
+      // Avoid `rowIndex` so row identity stays stable when filtering (Income/Expense modes).
+      const amt = params.data?.amount
+      const amtN = Number(amt)
+      const amtKey = Number.isFinite(amtN) ? String(amtN) : ''
+      return `${params.data?.date ?? ''}-${params.data?.description ?? ''}-${amtKey}`
+    },
     []
   )
 

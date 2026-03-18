@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'finance_data'
+const SELECTED_TAB_KEY = 'finance_selected_tab_id'
 
 const defaultData = () => ({
   rules: {},
@@ -63,5 +64,34 @@ export function saveFinanceData(data) {
     )
   } catch (e) {
     console.error('Failed to save finance data:', e)
+  }
+}
+
+/**
+ * Get the last selected tab id from localStorage (for restore on refresh).
+ * @returns {string|null}
+ */
+export function getSelectedTabId() {
+  try {
+    const id = localStorage.getItem(SELECTED_TAB_KEY)
+    return id && id.length > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Persist the selected tab id so it can be restored on refresh.
+ * @param {string} tabId
+ */
+export function setSelectedTabIdStorage(tabId) {
+  try {
+    if (tabId != null && tabId !== '') {
+      localStorage.setItem(SELECTED_TAB_KEY, tabId)
+    } else {
+      localStorage.removeItem(SELECTED_TAB_KEY)
+    }
+  } catch (e) {
+    console.error('Failed to save selected tab id:', e)
   }
 }
