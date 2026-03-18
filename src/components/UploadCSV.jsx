@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import { parseCSV, isDuplicate } from '../utils/csv'
 import { categorizeWithRules } from '../utils/classifier'
-import { buildContextFromPriorMonths, categorizeWithLLM } from '../utils/llmCategorize'
+import { buildContextFromOtherTabs, categorizeWithLLM } from '../utils/llmCategorize'
 import { loadFinanceData, saveFinanceData } from '../utils/storage'
+
+function generateTabId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9)
+}
 
 export default function UploadCSV({ financeData, onRefresh }) {
   const [loading, setLoading] = useState(false)
@@ -21,18 +27,19 @@ export default function UploadCSV({ financeData, onRefresh }) {
         return
       }
 
-      const { rules, months } = loadFinanceData()
-      const allExisting = Object.values(months).flat()
-      const newRows = rows.filter((r) => !isDuplicate(r, allExisting))
-      if (newRows.length === 0) {
-        setError('All rows are duplicates; nothing to add.')
-        setLoading(false)
-        return
+      const { rules, tabs, tabOrder } = loadFinanceData()
+      const withinFileDeduped = []
+      const seen = new Set()
+      for (const r of rows) {
+        const key = `${r.date}|${r.description}|${r.amount}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        withinFileDeduped.push(r)
       }
 
       const withRules = []
       const forLlm = []
-      for (const row of newRows) {
+      for (const row of withinFileDeduped) {
         const category = row.category ?? categorizeWithRules(row.description, rules)
         if (category) {
           withRules.push({ ...row, category })
@@ -43,11 +50,7 @@ export default function UploadCSV({ financeData, onRefresh }) {
 
       if (forLlm.length > 0) {
         try {
-          const monthKeys = Object.keys(months)
-          const excludeMonth = monthKeys.length > 0 ? null : null
-          const contextMonths = { ...months }
-          const firstNewMonth = newRows[0]?.date?.slice(0, 7)
-          const priorContext = buildContextFromPriorMonths(contextMonths, firstNewMonth)
+          const priorContext = buildContextFromOtherTabs(tabs, null)
           const categories = await categorizeWithLLM(forLlm, priorContext)
           forLlm.forEach((row, i) => {
             withRules.push({ ...row, category: categories[i] || 'Uncategorized' })
@@ -60,14 +63,12 @@ export default function UploadCSV({ financeData, onRefresh }) {
         }
       }
 
-      const nextMonths = { ...months }
-      for (const row of withRules) {
-        const key = row.date.slice(0, 7)
-        if (!nextMonths[key]) nextMonths[key] = []
-        nextMonths[key].push(row)
-      }
-      saveFinanceData({ rules, months: nextMonths })
-      onRefresh()
+      const tabId = generateTabId()
+      const label = file.name && file.name.trim() ? file.name.trim() : `Upload ${new Date().toLocaleString()}`
+      const nextTabs = { ...tabs, [tabId]: { label, transactions: withRules } }
+      const nextTabOrder = [...tabOrder, tabId]
+      saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextTabOrder })
+      onRefresh(tabId)
     } catch (err) {
       setError(err.message || 'Upload failed.')
     } finally {

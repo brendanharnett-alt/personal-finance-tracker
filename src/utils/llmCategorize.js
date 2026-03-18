@@ -18,6 +18,25 @@ export function buildContextFromPriorMonths(months, excludeMonth) {
 }
 
 /**
+ * Build context from all other tabs (for LLM). Excludes one tab by id.
+ * @param {Record<string, { label: string, transactions: Array<{ description: string, category: string }> }>} tabs
+ * @param {string} excludeTabId
+ * @returns {string}
+ */
+export function buildContextFromOtherTabs(tabs, excludeTabId) {
+  const pairs = []
+  for (const [tabId, tab] of Object.entries(tabs)) {
+    if (tabId === excludeTabId || !tab?.transactions) continue
+    for (const t of tab.transactions) {
+      if (t.description && t.category) {
+        pairs.push(`${t.description} -> ${t.category}`)
+      }
+    }
+  }
+  return pairs.length ? pairs.join('\n') : ''
+}
+
+/**
  * Call backend to categorize transactions using LLM. Returns array of category strings (one per row).
  * @param {Array<{ date: string, description: string, amount: number }>} transactions
  * @param {string} priorContext  description -> category from prior months

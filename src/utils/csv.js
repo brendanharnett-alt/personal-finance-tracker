@@ -18,13 +18,30 @@ function findColumnIndex(headers, possibleNames) {
 
 /**
  * Parse a date string to YYYY-MM-DD.
+ * Tries Date() first, then DD/MM/YYYY or DD-MM-YYYY if that fails.
  * @param {string} value
  * @returns {string|null}
  */
 function parseDate(value) {
   if (!value || typeof value !== 'string') return null
   const trimmed = value.trim()
-  const d = new Date(trimmed)
+  let d = new Date(trimmed)
+  if (Number.isNaN(d.getTime())) {
+    const parts = trimmed.split(/[/\-]/)
+    if (parts.length === 3) {
+      const p0 = parseInt(parts[0], 10)
+      const p1 = parseInt(parts[1], 10)
+      const p2 = parseInt(parts[2], 10)
+      if (p0 > 31 && p1 <= 12 && p2 <= 31) {
+        d = new Date(p0, p1 - 1, p2)
+      } else if (p0 <= 31 && p1 <= 12 && p2 > 31) {
+        d = new Date(p2, p1 - 1, p0)
+      } else if (p0 <= 31 && p1 <= 12 && p2 <= 99) {
+        const year = p2 < 100 ? 2000 + p2 : p2
+        d = new Date(year, p1 - 1, p0)
+      }
+    }
+  }
   if (Number.isNaN(d.getTime())) return null
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -34,15 +51,18 @@ function parseDate(value) {
 
 /**
  * Parse amount: strip currency, handle negatives.
+ * Handles parentheses for negatives e.g. (29.99) => -29.99.
  * @param {string} value
  * @returns {number|null}
  */
 function parseAmount(value) {
   if (value === '' || value === null || value === undefined) return null
-  const str = String(value).replace(/[$,]/g, '').trim()
+  let str = String(value).replace(/[$,]/g, '').trim()
+  const inParens = str.startsWith('(') && str.endsWith(')')
+  if (inParens) str = str.slice(1, -1).trim()
   const num = parseFloat(str)
   if (Number.isNaN(num)) return null
-  return num
+  return inParens ? -Math.abs(num) : num
 }
 
 /**
