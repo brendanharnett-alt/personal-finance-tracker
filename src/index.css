@@ -1,3 +1,20 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Make AG Grid header separators more explicit (Excel-like). */
+.ag-theme-quartz .ag-header-cell,
+.ag-theme-quartz-dark .ag-header-cell,
+.ag-theme-quartz-auto-dark .ag-header-cell,
+.ag-theme-quartz .ag-header-group-cell,
+.ag-theme-quartz-dark .ag-header-group-cell,
+.ag-theme-quartz-auto-dark .ag-header-group-cell {
+  border-right: 1px solid color-mix(in srgb, transparent, var(--ag-foreground-color) 30%);
+}
+
+.ag-theme-quartz .ag-header-cell:last-child,
+.ag-theme-quartz-dark .ag-header-cell:last-child,
+.ag-theme-quartz-auto-dark .ag-header-cell:last-child {
+  border-right: none;
+}
+

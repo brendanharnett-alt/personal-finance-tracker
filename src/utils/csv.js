@@ -5,6 +5,9 @@ const COLUMNS = {
   description: ['Transaction Description', 'Description', 'transaction description', 'description'],
   amount: ['Amount', 'amount'],
   category: ['Category', 'category'],
+  balance: ['Balance', 'balance'],
+  type: ['Type', 'type'],
+  typeDetail: ['Type Detail', 'Type Detail', 'type detail'],
 }
 
 function findColumnIndex(headers, possibleNames) {
@@ -91,6 +94,9 @@ export function parseCSV(file) {
         const iDesc = findColumnIndex(headers, COLUMNS.description)
         const iAmount = findColumnIndex(headers, COLUMNS.amount)
         const iCategory = findColumnIndex(headers, COLUMNS.category)
+        const iBalance = findColumnIndex(headers, COLUMNS.balance)
+        const iType = findColumnIndex(headers, COLUMNS.type)
+        const iTypeDetail = findColumnIndex(headers, COLUMNS.typeDetail)
 
         if (iDate === -1 || iDesc === -1 || iAmount === -1) {
           reject(new Error('CSV must have columns: Transaction Date, Transaction Description, Amount'))
@@ -107,6 +113,15 @@ export function parseCSV(file) {
           const rec = { date: dateStr, description, amount }
           if (iCategory !== -1 && values[iCategory] != null && String(values[iCategory]).trim() !== '') {
             rec.category = String(values[iCategory]).trim()
+          }
+          if (iBalance !== -1) {
+            rec.balance = parseAmount(values[iBalance])
+          }
+          if (iType !== -1) {
+            rec.type = String(values[iType] ?? '').trim()
+          }
+          if (iTypeDetail !== -1) {
+            rec.typeDetail = String(values[iTypeDetail] ?? '').trim()
           }
           out.push(rec)
         }

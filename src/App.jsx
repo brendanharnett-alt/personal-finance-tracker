@@ -1,13 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { loadFinanceData, saveFinanceData } from './utils/storage'
 import UploadCSV from './components/UploadCSV'
 import MonthTabs from './components/MonthTabs'
 import TransactionGrid from './components/TransactionGrid'
 import SpendHistogram from './components/SpendHistogram'
 
+const defaultChartVisibility = () => ({ showIncome: false, showExpense: true })
+
 function App() {
   const [financeData, setFinanceData] = useState({ rules: {}, tabs: {}, tabOrder: [] })
   const [selectedTabId, setSelectedTabId] = useState(null)
+  const [chartVisibilityByTabId, setChartVisibilityByTabId] = useState({})
+  const [chartDrillDownByTabId, setChartDrillDownByTabId] = useState({})
 
   const refresh = useCallback((selectTabId = null) => {
     const data = loadFinanceData()
@@ -28,6 +32,19 @@ function App() {
   const { tabs = {}, tabOrder = [] } = financeData
   const transactions = selectedTabId && tabs[selectedTabId] ? tabs[selectedTabId].transactions || [] : []
 
+  const getTypeLabel = useCallback((t) =>
+    (t.type != null && String(t.type).trim() !== '') ? String(t.type).trim() : 'Uncategorized', [])
+
+  const selectedChartType = selectedTabId ? (chartDrillDownByTabId[selectedTabId] ?? null) : null
+  const filteredTransactions = useMemo(() => {
+    if (selectedChartType == null || selectedChartType === 'Total') return transactions
+    return transactions.filter((t) => getTypeLabel(t) === selectedChartType)
+  }, [transactions, selectedChartType, getTypeLabel])
+
+  const handleBarClick = useCallback((tabId, typeName) => {
+    setChartDrillDownByTabId((prev) => ({ ...prev, [tabId]: typeName }))
+  }, [])
+
   useEffect(() => {
     if (tabOrder.length === 0) return
     if (!selectedTabId || !tabOrder.includes(selectedTabId)) setSelectedTabId(tabOrder[0])
@@ -41,6 +58,16 @@ function App() {
       delete nextTabs[tabId]
       saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
       setFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
+      setChartVisibilityByTabId((prev) => {
+        const next = { ...prev }
+        delete next[tabId]
+        return next
+      })
+      setChartDrillDownByTabId((prev) => {
+        const next = { ...prev }
+        delete next[tabId]
+        return next
+      })
       if (selectedTabId === tabId) setSelectedTabId(nextOrder[0] ?? null)
     },
     [selectedTabId]
@@ -54,6 +81,19 @@ function App() {
         [tabId]: { ...prev.tabs[tabId], transactions: updatedTransactions },
       },
     }))
+  }, [])
+
+  const chartVisibilityRaw = selectedTabId
+    ? (chartVisibilityByTabId[selectedTabId] ?? defaultChartVisibility())
+    : defaultChartVisibility()
+  const chartVisibility = useMemo(() => {
+    const { showIncome, showExpense } = chartVisibilityRaw
+    if (showIncome) return { showIncome: true, showExpense: false }
+    return { showIncome: false, showExpense: true }
+  }, [chartVisibilityRaw])
+
+  const handleChartTogglesChange = useCallback((tabId, next) => {
+    setChartVisibilityByTabId((prev) => ({ ...prev, [tabId]: next }))
   }, [])
 
   return (
@@ -76,11 +116,28 @@ function App() {
           {selectedTabId && (
             <>
               <SpendHistogram
-                key={`chart-${selectedTabId}-${transactions.map((t) => t.category ?? '').join(',')}`}
+                key={`chart-${selectedTabId}`}
                 transactions={transactions}
+                showIncome={chartVisibility.showIncome}
+                showExpense={chartVisibility.showExpense}
+                onTogglesChange={(next) => handleChartTogglesChange(selectedTabId, next)}
+                onBarClick={(typeName) => handleBarClick(selectedTabId, typeName)}
+                selectedTypeName={selectedChartType}
               />
+              {selectedChartType != null && selectedChartType !== 'Total' && (
+                <div className="flex items-center gap-2 mb-2 text-sm text-neutral-600">
+                  <span>Showing: {selectedChartType}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleBarClick(selectedTabId, null)}
+                    className="px-2 py-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
               <TransactionGrid
-                transactions={transactions}
+                transactions={filteredTransactions}
                 financeData={financeData}
                 selectedTabId={selectedTabId}
                 onRefresh={refresh}
