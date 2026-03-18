@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useEffect, useRef } from 'react'
+import { useCallback, useMemo, useEffect, useRef, useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 import 'ag-grid-community/styles/ag-grid.css'
@@ -11,6 +11,26 @@ import SetFilterWithAdvanced, { doesFilterPassSetWithAdvanced } from './SetFilte
 
 export default function TransactionGrid({ transactions, financeData, selectedTabId, onRefresh, onTabTransactionsUpdate }) {
   const tooltipLogCount = useRef(0)
+
+  const allTabTransactions = selectedTabId && financeData?.tabs?.[selectedTabId] ? financeData.tabs[selectedTabId].transactions || [] : []
+  const hasTypeColumn = allTabTransactions.length > 0 && Object.prototype.hasOwnProperty.call(allTabTransactions[0], 'type')
+  const isBlankType = (v) => v == null || String(v).trim() === ''
+  const blankTypeTargetCount = hasTypeColumn ? allTabTransactions.filter((t) => isBlankType(t.type) && (t.description ?? '').toString().trim() !== '').length : 0
+  const tabOrder = financeData?.tabOrder ?? []
+  const otherTabIds = tabOrder.filter((id) => id !== selectedTabId)
+
+  const [trainingK, setTrainingK] = useState(3)
+  const [trainingTabIds, setTrainingTabIds] = useState([])
+  const [aiTypeFillRunning, setAiTypeFillRunning] = useState(false)
+  const [aiTypeFillError, setAiTypeFillError] = useState(null)
+
+  useEffect(() => {
+    if (!selectedTabId) return
+    const k = Math.min(3, otherTabIds.length)
+    setTrainingK(k)
+    setTrainingTabIds(otherTabIds.slice(-k))
+    setAiTypeFillError(null)
+  }, [selectedTabId])
 
   const defaultColDef = useMemo(
     () => ({
@@ -100,7 +120,19 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
       })
     }
     if (first && 'type' in first) {
-      base.push({ field: 'type', headerName: 'Type', editable: true, filter: setFilterWithAdvanced, width: 120 })
+      base.push({
+        field: 'type',
+        headerName: 'Type',
+        editable: true,
+        filter: setFilterWithAdvanced,
+        width: 120,
+        cellStyle: (params) => {
+          if (params?.data?.typeFillSource === 'ai') {
+            return { backgroundColor: '#fde68a' }
+          }
+          return undefined
+        },
+      })
     }
     if (first && 'typeDetail' in first) {
       base.push({ field: 'typeDetail', headerName: 'Type Detail', editable: true, filter: setFilterWithAdvanced, width: 140 })
@@ -151,9 +183,13 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         if (newBalance !== null && Number.isNaN(newBalance)) return
         nextList[idx] = { ...nextList[idx], balance: newBalance }
         saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
-      } else if (field === 'type' || field === 'typeDetail') {
+      } else if (field === 'type') {
         const newValue = event.newValue != null ? String(event.newValue).trim() : ''
-        nextList[idx] = { ...nextList[idx], [field]: newValue }
+        nextList[idx] = { ...nextList[idx], type: newValue, typeFillSource: undefined }
+        saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+      } else if (field === 'typeDetail') {
+        const newValue = event.newValue != null ? String(event.newValue).trim() : ''
+        nextList[idx] = { ...nextList[idx], typeDetail: newValue }
         saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
       }
 
@@ -166,6 +202,123 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
     (params) => `${params.rowIndex}-${params.data.date}-${params.data.description}`,
     []
   )
+
+  const handleTrainingKChange = useCallback(
+    (e) => {
+      const nextK = Number(e.target.value)
+      const k = Number.isFinite(nextK) && nextK > 0 ? nextK : 1
+      setTrainingK(k)
+      setTrainingTabIds(otherTabIds.slice(-k))
+      setAiTypeFillError(null)
+    },
+    [otherTabIds]
+  )
+
+  const handleTrainingTabIdsChange = useCallback((e) => {
+    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value)
+    setTrainingTabIds(selected)
+    setTrainingK(Math.max(1, selected.length))
+    setAiTypeFillError(null)
+  }, [])
+
+  const handleAiTypeFill = useCallback(async () => {
+    if (!selectedTabId || !hasTypeColumn) return
+    if (aiTypeFillRunning) return
+    if (trainingTabIds.length === 0) {
+      setAiTypeFillError('Select at least one dataset (training tab).')
+      return
+    }
+    if (blankTypeTargetCount === 0) {
+      setAiTypeFillError('No blank Type cells found in this tab.')
+      return
+    }
+
+    setAiTypeFillRunning(true)
+    setAiTypeFillError(null)
+    try {
+      const { rules, tabs, tabOrder } = loadFinanceData()
+      const currentTab = tabs[selectedTabId]
+      const currentList = currentTab?.transactions ?? []
+
+      const targetIndices = []
+      const targets = []
+      for (let i = 0; i < currentList.length; i += 1) {
+        const t = currentList[i]
+        if (isBlankType(t?.type) && (t?.description ?? '').toString().trim() !== '') {
+          targetIndices.push(i)
+          targets.push({ description: (t.description ?? '').toString().trim() })
+        }
+      }
+
+      if (targets.length === 0) {
+        setAiTypeFillError('No blank Type cells found (with non-empty Description).')
+        return
+      }
+
+      const pairSeen = new Set()
+      const trainingPairs = []
+      for (const tabId of trainingTabIds) {
+        const tabTx = tabs[tabId]?.transactions ?? []
+        for (const t of tabTx) {
+          const desc = (t?.description ?? '').toString().trim()
+          const ty = (t?.type ?? '').toString().trim()
+          if (!desc || !ty) continue
+          const key = `${desc}|${ty}`
+          if (pairSeen.has(key)) continue
+          pairSeen.add(key)
+          trainingPairs.push({ description: desc, type: ty })
+        }
+      }
+
+      const MAX_TRAINING_PAIRS = 400
+      const cappedPairs = trainingPairs.slice(0, MAX_TRAINING_PAIRS)
+      const typeSet = new Set(cappedPairs.map((p) => p.type))
+      const types = Array.from(typeSet)
+
+      if (cappedPairs.length === 0) {
+        setAiTypeFillError('No training pairs found. Make sure your training tabs have Type filled.')
+        return
+      }
+
+      const res = await fetch('/api/type-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trainingPairs: cappedPairs,
+          types,
+          targets,
+        }),
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `type-fill failed: ${res.status}`)
+      }
+
+      const data = await res.json()
+      const recommended = data?.types
+      if (!Array.isArray(recommended) || recommended.length !== targets.length) {
+        throw new Error('Invalid type-fill response shape')
+      }
+
+      const nextList = [...currentList]
+      for (let i = 0; i < targetIndices.length; i += 1) {
+        const idx = targetIndices[i]
+        nextList[idx] = { ...nextList[idx], type: recommended[i] ?? '', typeFillSource: 'ai' }
+      }
+
+      saveFinanceData({
+        rules,
+        tabs: { ...tabs, [selectedTabId]: { ...currentTab, transactions: nextList } },
+        tabOrder,
+      })
+      if (onTabTransactionsUpdate) onTabTransactionsUpdate(selectedTabId, nextList)
+    } catch (e) {
+      setAiTypeFillError(e?.message || 'AI Type Fill failed.')
+    } finally {
+      setAiTypeFillRunning(false)
+    }
+  }, [aiTypeFillRunning, blankTypeTargetCount, hasTypeColumn, onTabTransactionsUpdate, selectedTabId, trainingTabIds, isBlankType])
 
   useEffect(() => {
     // #region agent log
@@ -188,17 +341,79 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   }, [])
 
   return (
-    <div className="ag-theme-quartz mb-6" style={{ height: 400, width: '100%' }}>
-      <AgGridReact
-        rowData={transactions}
-        columnDefs={columnDefs}
-        defaultColDef={defaultColDef}
-        onCellValueChanged={onCellValueChanged}
-        getRowId={getRowId}
-        suppressCellFocus={false}
-        enableBrowserTooltips
-        enableFilterHandlers
-      />
+    <div className="mb-6">
+      {hasTypeColumn && (
+        <div className="flex flex-wrap items-start gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAiTypeFill}
+              disabled={aiTypeFillRunning || trainingTabIds.length === 0 || blankTypeTargetCount === 0}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                aiTypeFillRunning || trainingTabIds.length === 0 || blankTypeTargetCount === 0
+                  ? 'bg-neutral-200 text-neutral-500 cursor-not-allowed'
+                  : 'bg-neutral-800 text-white hover:bg-neutral-700'
+              }`}
+            >
+              {aiTypeFillRunning ? 'Filling Types…' : 'Use AI Type Fill'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-neutral-600">Training tabs</label>
+            <select
+              value={trainingK}
+              onChange={handleTrainingKChange}
+              className="border border-neutral-300 rounded px-2 py-1 text-sm bg-white"
+              disabled={otherTabIds.length === 0}
+            >
+              {Array.from({ length: Math.max(1, Math.min(6, otherTabIds.length || 1)) }, (_, i) => {
+                const v = i + 1
+                return (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+
+          <div className="flex flex-col">
+            <label className="text-sm text-neutral-600 mb-1">Datasets</label>
+            <select
+              multiple
+              value={trainingTabIds}
+              onChange={handleTrainingTabIdsChange}
+              className="border border-neutral-300 rounded px-2 py-1 text-sm bg-white h-28 w-64"
+              disabled={otherTabIds.length === 0}
+            >
+              {otherTabIds.map((tabId) => {
+                const label = financeData?.tabs?.[tabId]?.label ?? tabId
+                return (
+                  <option key={tabId} value={tabId}>
+                    {label}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {aiTypeFillError && <div className="text-sm text-amber-700 mb-3">{aiTypeFillError}</div>}
+
+      <div className="ag-theme-quartz" style={{ height: 400, width: '100%' }}>
+        <AgGridReact
+          rowData={transactions}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          onCellValueChanged={onCellValueChanged}
+          getRowId={getRowId}
+          suppressCellFocus={false}
+          enableBrowserTooltips
+          enableFilterHandlers
+        />
+      </div>
     </div>
   )
 }
