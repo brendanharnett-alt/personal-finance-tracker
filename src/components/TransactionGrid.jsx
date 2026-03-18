@@ -23,6 +23,8 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   const [trainingTabIds, setTrainingTabIds] = useState([])
   const [aiTypeFillRunning, setAiTypeFillRunning] = useState(false)
   const [aiTypeFillError, setAiTypeFillError] = useState(null)
+  const [aiTypeFillProgressDone, setAiTypeFillProgressDone] = useState(0)
+  const [aiTypeFillProgressTotal, setAiTypeFillProgressTotal] = useState(0)
 
   useEffect(() => {
     if (!selectedTabId) return
@@ -235,6 +237,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
 
     setAiTypeFillRunning(true)
     setAiTypeFillError(null)
+    setAiTypeFillProgressDone(0)
     try {
       const { rules, tabs, tabOrder } = loadFinanceData()
       const currentTab = tabs[selectedTabId]
@@ -254,6 +257,8 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         setAiTypeFillError('No blank Type cells found (with non-empty Description).')
         return
       }
+
+      setAiTypeFillProgressTotal(targets.length)
 
       const pairSeen = new Set()
       const trainingPairs = []
@@ -280,39 +285,81 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         return
       }
 
-      const res = await fetch('/api/type-fill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trainingPairs: cappedPairs,
-          types,
-          targets,
-        }),
-      })
+      // Work progressively, but ensure each successful batch produces a new array reference.
+      // This prevents stale memoization in parent components/graphs that depend on array identity.
+      let nextList = [...currentList]
 
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `type-fill failed: ${res.status}`)
+      const BATCH_SIZE = 15
+
+      const fillTargetsBatch = async (chunkTargetIndices, chunkTargets) => {
+        const res = await fetch('/api/type-fill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trainingPairs: cappedPairs,
+            types,
+            targets: chunkTargets,
+          }),
+        })
+
+        if (!res.ok) {
+          const text = await res.text()
+          throw new Error(text || `type-fill failed: ${res.status}`)
+        }
+
+        const data = await res.json()
+        const recommended = data?.types
+        if (!Array.isArray(recommended) || recommended.length !== chunkTargets.length) {
+          throw new Error('Invalid type-fill LLM response shape')
+        }
+
+        // Copy once per successful batch so downstream memoization sees a new array reference.
+        const updatedList = [...nextList]
+
+        for (let i = 0; i < chunkTargetIndices.length; i += 1) {
+          const idx = chunkTargetIndices[i]
+          updatedList[idx] = { ...updatedList[idx], type: recommended[i] ?? '', typeFillSource: 'ai' }
+        }
+
+        nextList = updatedList
+
+        saveFinanceData({
+          rules,
+          tabs: { ...tabs, [selectedTabId]: { ...currentTab, transactions: updatedList } },
+          tabOrder,
+        })
+        if (onTabTransactionsUpdate) onTabTransactionsUpdate(selectedTabId, updatedList)
+        setAiTypeFillProgressDone((d) => d + chunkTargets.length)
       }
 
-      const data = await res.json()
-      const recommended = data?.types
-      if (!Array.isArray(recommended) || recommended.length !== targets.length) {
-        throw new Error('Invalid type-fill response shape')
+      const fillTargetsBatchWithRetry = async (chunkTargetIndices, chunkTargets) => {
+        try {
+          await fillTargetsBatch(chunkTargetIndices, chunkTargets)
+        } catch (e) {
+          const msg = e?.message || ''
+          const lower = msg.toLowerCase()
+          if (
+            lower.includes('invalid type-fill llm response shape')
+          ) {
+            if (chunkTargets.length <= 1) throw e
+            const mid = Math.floor(chunkTargets.length / 2)
+            const leftIndices = chunkTargetIndices.slice(0, mid)
+            const leftTargets = chunkTargets.slice(0, mid)
+            const rightIndices = chunkTargetIndices.slice(mid)
+            const rightTargets = chunkTargets.slice(mid)
+            await fillTargetsBatchWithRetry(leftIndices, leftTargets)
+            await fillTargetsBatchWithRetry(rightIndices, rightTargets)
+            return
+          }
+          throw e
+        }
       }
 
-      const nextList = [...currentList]
-      for (let i = 0; i < targetIndices.length; i += 1) {
-        const idx = targetIndices[i]
-        nextList[idx] = { ...nextList[idx], type: recommended[i] ?? '', typeFillSource: 'ai' }
+      for (let start = 0; start < targets.length; start += BATCH_SIZE) {
+        const chunkTargetIndices = targetIndices.slice(start, start + BATCH_SIZE)
+        const chunkTargets = targets.slice(start, start + BATCH_SIZE)
+        await fillTargetsBatchWithRetry(chunkTargetIndices, chunkTargets)
       }
-
-      saveFinanceData({
-        rules,
-        tabs: { ...tabs, [selectedTabId]: { ...currentTab, transactions: nextList } },
-        tabOrder,
-      })
-      if (onTabTransactionsUpdate) onTabTransactionsUpdate(selectedTabId, nextList)
     } catch (e) {
       setAiTypeFillError(e?.message || 'AI Type Fill failed.')
     } finally {
@@ -355,7 +402,9 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
                   : 'bg-neutral-800 text-white hover:bg-neutral-700'
               }`}
             >
-              {aiTypeFillRunning ? 'Filling Types…' : 'Use AI Type Fill'}
+              {aiTypeFillRunning
+                ? `Filling Types… (${aiTypeFillProgressDone}/${aiTypeFillProgressTotal || blankTypeTargetCount || 0})`
+                : 'Use AI Type Fill'}
             </button>
           </div>
 
@@ -365,7 +414,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
               value={trainingK}
               onChange={handleTrainingKChange}
               className="border border-neutral-300 rounded px-2 py-1 text-sm bg-white"
-              disabled={otherTabIds.length === 0}
+              disabled={aiTypeFillRunning || otherTabIds.length === 0}
             >
               {Array.from({ length: Math.max(1, Math.min(6, otherTabIds.length || 1)) }, (_, i) => {
                 const v = i + 1
@@ -385,7 +434,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
               value={trainingTabIds}
               onChange={handleTrainingTabIdsChange}
               className="border border-neutral-300 rounded px-2 py-1 text-sm bg-white h-28 w-64"
-              disabled={otherTabIds.length === 0}
+              disabled={aiTypeFillRunning || otherTabIds.length === 0}
             >
               {otherTabIds.map((tabId) => {
                 const label = financeData?.tabs?.[tabId]?.label ?? tabId
@@ -396,6 +445,22 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
                 )
               })}
             </select>
+          </div>
+        </div>
+      )}
+
+      {hasTypeColumn && aiTypeFillRunning && aiTypeFillProgressTotal > 0 && (
+        <div className="w-full mb-3">
+          <div className="text-xs text-neutral-600 mb-1">
+            Filled {aiTypeFillProgressDone} / {aiTypeFillProgressTotal}
+          </div>
+          <div className="h-2 bg-neutral-200 rounded overflow-hidden">
+            <div
+              className="h-full bg-blue-600 transition-[width] duration-200"
+              style={{
+                width: `${Math.max(0, Math.min(100, (aiTypeFillProgressDone / aiTypeFillProgressTotal) * 100))}%`,
+              }}
+            />
           </div>
         </div>
       )}
