@@ -11,6 +11,8 @@ import SetFilterWithAdvanced, { doesFilterPassSetWithAdvanced } from './SetFilte
 
 export default function TransactionGrid({ transactions, financeData, selectedTabId, onRefresh, onTabTransactionsUpdate }) {
   const tooltipLogCount = useRef(0)
+  const gridApiRef = useRef(null)
+  const savedColumnStateRef = useRef(null)
 
   const allTabTransactions = selectedTabId && financeData?.tabs?.[selectedTabId] ? financeData.tabs[selectedTabId].transactions || [] : []
   const hasTypeColumn = allTabTransactions.length > 0 && Object.prototype.hasOwnProperty.call(allTabTransactions[0], 'type')
@@ -42,6 +44,29 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
     setTrainingTabIds(otherTabIds.slice(-k))
     setAiTypeFillError(null)
   }, [selectedTabId])
+
+  const onGridReady = useCallback((params) => {
+    gridApiRef.current = params.api
+  }, [])
+
+  const onColumnResized = useCallback((params) => {
+    if (params.finished && params.api) {
+      const state = params.api.getColumnState()
+      if (state && state.length > 0) savedColumnStateRef.current = state
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!savedColumnStateRef.current || !gridApiRef.current) return
+    const api = gridApiRef.current
+    const state = savedColumnStateRef.current
+    const timer = setTimeout(() => {
+      try {
+        api.applyColumnState({ state, applyOrder: false })
+      } catch (_) {}
+    }, 10)
+    return () => clearTimeout(timer)
+  }, [transactions])
 
   const defaultColDef = useMemo(
     () => ({
@@ -532,6 +557,8 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
           rowSelection="multiple"
           rowMultiSelectWithClick
           onSelectionChanged={onSelectionChanged}
+          onGridReady={onGridReady}
+          onColumnResized={onColumnResized}
         />
       </div>
     </div>
