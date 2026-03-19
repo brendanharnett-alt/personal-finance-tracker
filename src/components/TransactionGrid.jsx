@@ -25,6 +25,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   const [aiTypeFillError, setAiTypeFillError] = useState(null)
   const [aiTypeFillProgressDone, setAiTypeFillProgressDone] = useState(0)
   const [aiTypeFillProgressTotal, setAiTypeFillProgressTotal] = useState(0)
+  const [selectedAmountSum, setSelectedAmountSum] = useState(null)
 
   const AMOUNT_EPSILON = 1e-6
   const normalizeAmountForCompare = useCallback((v) => {
@@ -226,6 +227,29 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
     },
     []
   )
+
+  const onSelectionChanged = useCallback((event) => {
+    const api = event.api
+    if (!api) {
+      setSelectedAmountSum(null)
+      return
+    }
+    const rows = api.getSelectedRows()
+    if (!rows || rows.length === 0) {
+      setSelectedAmountSum(null)
+      return
+    }
+    let sum = 0
+    for (const row of rows) {
+      if (row && typeof row.amount === 'number' && Number.isFinite(row.amount)) {
+        sum += row.amount
+      } else if (row && row.amount != null) {
+        const n = Number(row.amount)
+        if (Number.isFinite(n)) sum += n
+      }
+    }
+    setSelectedAmountSum(sum)
+  }, [])
 
   const handleTrainingKChange = useCallback(
     (e) => {
@@ -489,6 +513,12 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
 
       {aiTypeFillError && <div className="text-sm text-amber-700 mb-3">{aiTypeFillError}</div>}
 
+      {selectedAmountSum != null && (
+        <div className="text-sm text-neutral-600 mb-2">
+          Selected (Amount): <strong>${Number(selectedAmountSum).toFixed(2)}</strong>
+        </div>
+      )}
+
       <div className="ag-theme-quartz" style={{ height: 400, width: '100%' }}>
         <AgGridReact
           rowData={transactions}
@@ -499,6 +529,9 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
           suppressCellFocus={false}
           enableBrowserTooltips
           enableFilterHandlers
+          rowSelection="multiple"
+          rowMultiSelectWithClick
+          onSelectionChanged={onSelectionChanged}
         />
       </div>
     </div>
