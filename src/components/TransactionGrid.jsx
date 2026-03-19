@@ -16,6 +16,8 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
 
   const allTabTransactions = selectedTabId && financeData?.tabs?.[selectedTabId] ? financeData.tabs[selectedTabId].transactions || [] : []
   const hasTypeColumn = allTabTransactions.length > 0 && Object.prototype.hasOwnProperty.call(allTabTransactions[0], 'type')
+  const hasBalanceColumn = allTabTransactions.length > 0 && Object.prototype.hasOwnProperty.call(allTabTransactions[0], 'balance')
+  const hasTypeDetailColumn = allTabTransactions.length > 0 && Object.prototype.hasOwnProperty.call(allTabTransactions[0], 'typeDetail')
   const isBlankType = (v) => v == null || String(v).trim() === ''
   const blankTypeTargetCount = hasTypeColumn ? allTabTransactions.filter((t) => isBlankType(t.type) && (t.description ?? '').toString().trim() !== '').length : 0
   const tabOrder = financeData?.tabOrder ?? []
@@ -52,21 +54,36 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   const onColumnResized = useCallback((params) => {
     if (params.finished && params.api) {
       const state = params.api.getColumnState()
-      if (state && state.length > 0) savedColumnStateRef.current = state
+      if (state && state.length > 0) {
+        // Preserve the user's resize/layout, but do NOT persist sort.
+        // Persisting sort here causes the grid sort model to be overwritten when rowData updates
+        // (e.g. when editing `type` removes/re-inserts the row due to filtering).
+        savedColumnStateRef.current = state.map((c) => {
+          // Remove sort fields entirely so applyColumnState doesn't overwrite the user's current sort.
+          // eslint-disable-next-line no-unused-vars
+          const { sort, sortIndex, ...rest } = c
+          return rest
+        })
+      }
     }
   }, [])
 
   useEffect(() => {
     if (!savedColumnStateRef.current || !gridApiRef.current) return
     const api = gridApiRef.current
-    const state = savedColumnStateRef.current
+    // Extra safety: ensure sort isn't accidentally present even if older saved state exists.
+    const state = savedColumnStateRef.current.map((c) => {
+      // eslint-disable-next-line no-unused-vars
+      const { sort, sortIndex, ...rest } = c
+      return rest
+    })
     const timer = setTimeout(() => {
       try {
         api.applyColumnState({ state, applyOrder: false })
       } catch (_) {}
     }, 10)
     return () => clearTimeout(timer)
-  }, [transactions])
+  }, [selectedTabId, hasBalanceColumn, hasTypeColumn, hasTypeDetailColumn])
 
   const defaultColDef = useMemo(
     () => ({
@@ -139,8 +156,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         width: 160,
       },
     ]
-    const first = transactions.length ? transactions[0] : null
-    if (first && 'balance' in first) {
+    if (hasBalanceColumn) {
       base.push({
         field: 'balance',
         headerName: 'Balance',
@@ -155,7 +171,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         },
       })
     }
-    if (first && 'type' in first) {
+    if (hasTypeColumn) {
       base.push({
         field: 'type',
         headerName: 'Type',
@@ -170,11 +186,11 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         },
       })
     }
-    if (first && 'typeDetail' in first) {
+    if (hasTypeDetailColumn) {
       base.push({ field: 'typeDetail', headerName: 'Type Detail', editable: true, filter: setFilterWithAdvanced, width: 140 })
     }
     return base
-  }, [transactions, setFilterWithAdvanced])
+  }, [hasBalanceColumn, hasTypeColumn, hasTypeDetailColumn, setFilterWithAdvanced])
 
   const onCellValueChanged = useCallback(
     (event) => {
