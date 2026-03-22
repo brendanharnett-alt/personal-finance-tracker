@@ -193,13 +193,13 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   }, [hasBalanceColumn, hasTypeColumn, hasTypeDetailColumn, setFilterWithAdvanced])
 
   const onCellValueChanged = useCallback(
-    (event) => {
+    async (event) => {
       const field = event.colDef?.field
       const editableFields = ['category', 'amount', 'balance', 'type', 'typeDetail']
       if (!editableFields.includes(field)) return
       if (event.data == null) return
 
-      const { rules, tabs, tabOrder } = loadFinanceData()
+      const { rules, tabs, tabOrder } = await loadFinanceData()
       if (!selectedTabId) return
       const tab = tabs[selectedTabId]
       if (!tab || !Array.isArray(tab.transactions)) return
@@ -229,28 +229,28 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
         const key = normalizeDescription(event.data.description)
         if (key) {
           const nextRules = { ...rules, [key]: newCategory }
-          saveFinanceData({ rules: nextRules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+          await saveFinanceData({ rules: nextRules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
         } else {
-          saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+          await saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
         }
       } else if (field === 'amount') {
         const newAmount = event.newValue != null && event.newValue !== '' ? Number(event.newValue) : null
         if (newAmount === null || Number.isNaN(newAmount)) return
         nextList[idx] = { ...nextList[idx], amount: newAmount }
-        saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+        await saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
       } else if (field === 'balance') {
         const newBalance = event.newValue != null && event.newValue !== '' ? Number(event.newValue) : null
         if (newBalance !== null && Number.isNaN(newBalance)) return
         nextList[idx] = { ...nextList[idx], balance: newBalance }
-        saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+        await saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
       } else if (field === 'type') {
         const newValue = event.newValue != null ? String(event.newValue).trim() : ''
         nextList[idx] = { ...nextList[idx], type: newValue, typeFillSource: undefined }
-        saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+        await saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
       } else if (field === 'typeDetail') {
         const newValue = event.newValue != null ? String(event.newValue).trim() : ''
         nextList[idx] = { ...nextList[idx], typeDetail: newValue }
-        saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
+        await saveFinanceData({ rules, tabs: { ...tabs, [selectedTabId]: { ...tab, transactions: nextList } }, tabOrder })
       }
 
       if (onTabTransactionsUpdate) onTabTransactionsUpdate(selectedTabId, nextList)
@@ -261,6 +261,8 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
   const getRowId = useCallback(
     (params) => {
       // Avoid `rowIndex` so row identity stays stable when filtering (Income/Expense modes).
+      const id = params.data?.id
+      if (id != null && id !== '') return `db-${id}`
       const amt = params.data?.amount
       const amtN = Number(amt)
       const amtKey = Number.isFinite(amtN) ? String(amtN) : ''
@@ -326,7 +328,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
     setAiTypeFillError(null)
     setAiTypeFillProgressDone(0)
     try {
-      const { rules, tabs, tabOrder } = loadFinanceData()
+      const { rules, tabs, tabOrder } = await loadFinanceData()
       const currentTab = tabs[selectedTabId]
       const currentList = currentTab?.transactions ?? []
 
@@ -410,7 +412,7 @@ export default function TransactionGrid({ transactions, financeData, selectedTab
 
         nextList = updatedList
 
-        saveFinanceData({
+        await saveFinanceData({
           rules,
           tabs: { ...tabs, [selectedTabId]: { ...currentTab, transactions: updatedList } },
           tabOrder,

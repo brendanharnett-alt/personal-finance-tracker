@@ -13,8 +13,8 @@ function App() {
   const [chartModeByTabId, setChartModeByTabId] = useState({})
   const [chartDrillDownByTabId, setChartDrillDownByTabId] = useState({})
 
-  const refresh = useCallback((selectTabId = null) => {
-    const data = loadFinanceData()
+  const refresh = useCallback(async (selectTabId = null) => {
+    const data = await loadFinanceData()
     // #region agent log
     const firstTabId = data.tabOrder?.[0]
     const tab = firstTabId ? data.tabs?.[firstTabId] : null
@@ -35,7 +35,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    refresh()
+    void refresh()
   }, [refresh])
 
   const { tabs = {}, tabOrder = [] } = financeData
@@ -83,12 +83,12 @@ function App() {
   }, [selectedTabId])
 
   const handleDeleteTab = useCallback(
-    (tabId) => {
-      const { rules, tabs: currentTabs, tabOrder: currentOrder } = loadFinanceData()
+    async (tabId) => {
+      const { rules, tabs: currentTabs, tabOrder: currentOrder } = await loadFinanceData()
       const nextOrder = currentOrder.filter((id) => id !== tabId)
       const nextTabs = { ...currentTabs }
       delete nextTabs[tabId]
-      saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
+      await saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
       setFinanceData({ rules, tabs: nextTabs, tabOrder: nextOrder })
       setChartModeByTabId((prev) => {
         const next = { ...prev }
@@ -123,14 +123,14 @@ function App() {
     }
   }, [])
 
-  const handleRenameTab = useCallback((tabId, newLabel) => {
+  const handleRenameTab = useCallback(async (tabId, newLabel) => {
     const trimmed = newLabel != null ? String(newLabel).trim() : ''
     if (!tabId || trimmed === '') return
-    const { rules, tabs: currentTabs, tabOrder } = loadFinanceData()
+    const { rules, tabs: currentTabs, tabOrder } = await loadFinanceData()
     const tab = currentTabs[tabId]
     if (!tab) return
     const nextTabs = { ...currentTabs, [tabId]: { ...tab, label: trimmed } }
-    saveFinanceData({ rules, tabs: nextTabs, tabOrder })
+    await saveFinanceData({ rules, tabs: nextTabs, tabOrder })
     setFinanceData((prev) => ({ ...prev, tabs: nextTabs }))
   }, [])
 

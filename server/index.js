@@ -5,6 +5,15 @@ const dotenv = require('dotenv')
 const path = require('path')
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') })
 
+const {
+  getFinanceState,
+  replaceFinanceState,
+  migrateFromPayload,
+  getAllTransactionsFlat,
+  insertTransaction,
+  deleteTransactionById,
+} = require('./financeRepo')
+
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '5mb' }))
@@ -175,6 +184,59 @@ ${targetLines}`
     res.json({ types: recommendations })
   } catch (e) {
     res.status(500).send(e.message || 'LLM request failed')
+  }
+})
+
+app.get('/api/finance', (req, res) => {
+  try {
+    res.json(getFinanceState())
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to load finance data' })
+  }
+})
+
+app.put('/api/finance', (req, res) => {
+  try {
+    replaceFinanceState(req.body)
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to save finance data' })
+  }
+})
+
+app.post('/api/migrate', (req, res) => {
+  try {
+    const result = migrateFromPayload(req.body)
+    res.json(result)
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Migration failed' })
+  }
+})
+
+app.get('/api/transactions', (req, res) => {
+  try {
+    res.json(getAllTransactionsFlat())
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to list transactions' })
+  }
+})
+
+app.post('/api/transactions', (req, res) => {
+  try {
+    const row = insertTransaction(req.body)
+    res.status(201).json(row)
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Invalid transaction' })
+  }
+})
+
+app.delete('/api/transactions/:id', (req, res) => {
+  try {
+    const n = deleteTransactionById(req.params.id)
+    if (!n) return res.status(404).json({ error: 'Not found' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Delete failed' })
   }
 })
 

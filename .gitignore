@@ -25,3 +25,8 @@ dist-ssr
 
 # Env files
 .env
+
+# Local SQLite database
+server/finance.db
+server/finance.db-shm
+server/finance.db-wal

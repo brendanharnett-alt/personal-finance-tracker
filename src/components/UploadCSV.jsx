@@ -27,7 +27,7 @@ export default function UploadCSV({ financeData, onRefresh }) {
         return
       }
 
-      const { rules, tabs, tabOrder } = loadFinanceData()
+      const { rules, tabs, tabOrder } = await loadFinanceData()
       const withinFileDeduped = []
       const seen = new Set()
       for (const r of rows) {
@@ -67,8 +67,8 @@ export default function UploadCSV({ financeData, onRefresh }) {
       const label = file.name && file.name.trim() ? file.name.trim() : `Upload ${new Date().toLocaleString()}`
       const nextTabs = { ...tabs, [tabId]: { label, transactions: withRules } }
       const nextTabOrder = [...tabOrder, tabId]
-      saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextTabOrder })
-      onRefresh(tabId)
+      await saveFinanceData({ rules, tabs: nextTabs, tabOrder: nextTabOrder })
+      await onRefresh(tabId)
     } catch (err) {
       setError(err.message || 'Upload failed.')
     } finally {

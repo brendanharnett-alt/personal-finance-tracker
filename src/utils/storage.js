@@ -34,14 +34,14 @@ function migrateFromMonths(data) {
 }
 
 /**
- * Load finance data from localStorage.
- * @returns {{ rules: Object, tabs: Object, tabOrder: string[] }}
+ * Load finance data from the API (SQLite backend).
+ * @returns {Promise<{ rules: Object, tabs: Object, tabOrder: string[] }>}
  */
-export function loadFinanceData() {
+export async function loadFinanceData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaultData()
-    const data = JSON.parse(raw)
+    const res = await fetch('/api/finance')
+    if (!res.ok) return defaultData()
+    const data = await res.json()
     return migrateFromMonths(data)
   } catch {
     return defaultData()
@@ -49,26 +49,57 @@ export function loadFinanceData() {
 }
 
 /**
- * Save finance data to localStorage.
+ * Save finance data via API (full replace in SQLite).
  * @param {{ rules: Object, tabs: Object, tabOrder: string[] }} data
+ * @returns {Promise<void>}
  */
-export function saveFinanceData(data) {
+export async function saveFinanceData(data) {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
+    const res = await fetch('/api/finance', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         rules: data.rules ?? {},
         tabs: data.tabs ?? {},
         tabOrder: data.tabOrder ?? [],
-      })
-    )
+      }),
+    })
+    if (!res.ok) {
+      const t = await res.text()
+      console.error('Failed to save finance data:', t || res.status)
+    }
   } catch (e) {
     console.error('Failed to save finance data:', e)
   }
 }
 
 /**
- * Get the last selected tab id from localStorage (for restore on refresh).
+ * One-time migration: read legacy localStorage blob and POST to /api/migrate, then remove the old key.
+ * Call manually from the console if needed: import { migrateLocalStorageToApi } from './utils/storage'
+ */
+export async function migrateLocalStorageToApi() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { skipped: true, reason: 'No localStorage finance_data' }
+    const body = JSON.parse(raw)
+    const res = await fetch('/api/migrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok && !json.skipped) {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+    return json
+  } catch (e) {
+    console.error(e)
+    return { error: e.message }
+  }
+}
+
+/**
+ * Get the last selected tab id from localStorage (restore on refresh).
  * @returns {string|null}
  */
 export function getSelectedTabId() {
